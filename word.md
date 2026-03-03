@@ -1,1 +1,1 @@
-- **abandon**
+- **abandon** ：放弃
