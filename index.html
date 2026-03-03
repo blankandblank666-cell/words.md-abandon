@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>六级生词库</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; line-height: 1.6; }
+        .card { border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        input, button { padding: 8px; margin: 5px 0; border: 1px solid #ccc; border-radius: 4px; }
+        button { background-color: #2ea44f; color: white; cursor: pointer; border: none; font-weight: bold; }
+        button:hover { background-color: #2c974b; }
+        .hidden { display: none; }
+        #quiz-area { text-align: center; background-color: #f6f8fa; }
+        #quiz-word { font-size: 2em; font-weight: bold; margin: 20px 0; color: #0366d6; }
+    </style>
+</head>
+<body>
+
+    <h2>📚 我的六级生词库</h2>
+
+    <div class="card" id="config-section">
+        <h3>1. 首次配置 (保存在本地浏览器)</h3>
+        <input type="password" id="gh-token" placeholder="输入 GitHub Token" style="width: 100%;">
+        <input type="text" id="gh-repo" placeholder="用户名/仓库名 (如: YourName/cet6-vocab)" style="width: 100%;">
+        <button onclick="saveConfig()">保存配置</button>
+    </div>
+
+    <div class="card">
+        <h3>2. 录入遗忘单词</h3>
+        <input type="text" id="word-en" placeholder="英文单词 (如: vulnerable)">
+        <input type="text" id="word-zh" placeholder="中文释义 (如: 脆弱的)">
+        <button onclick="addWord()">添加到云端 MD 文件</button>
+        <p id="status-msg" style="color: #666; font-size: 0.9em;"></p>
+    </div>
+
+    <div class="card" id="quiz-area">
+        <h3>3. 随机抽查</h3>
+        <button onclick="startQuiz()">加载云端词汇并开始抽查</button>
+        <div id="quiz-box" class="hidden">
+            <div id="quiz-word">abandon</div>
+            <button onclick="showMeaning()">查看释义</button>
+            <p id="quiz-meaning" class="hidden" style="font-size: 1.2em; color: #d73a49; font-weight: bold;"></p>
+            <br>
+            <button onclick="nextWord()" style="margin-top: 15px; background-color: #0366d6;">下一个 (Next)</button>
+        </div>
+    </div>
+
+<script>
+    // GitHub API 基础设定
+    let token = localStorage.getItem('ghToken') || '';
+    let repo = localStorage.getItem('ghRepo') || '';
+    const filePath = 'words.md';
+    let fileSha = ''; // 更新文件必须用到上一次的 SHA 码
+    let wordList = [];
+
+    // 初始化读取配置
+    if(token && repo) {
+        document.getElementById('gh-token').value = token;
+        document.getElementById('gh-repo').value = repo;
+    }
+
+    function saveConfig() {
+        token = document.getElementById('gh-token').value.trim();
+        repo = document.getElementById('gh-repo').value.trim();
+        localStorage.setItem('ghToken', token);
+        localStorage.setItem('ghRepo', repo);
+        alert('配置已保存在本地浏览器！');
+    }
+
+    // 解决 Base64 中文乱码的工具函数
+    function b64EncodeUnicode(str) {
+        return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {
+            return String.fromCharCode('0x' + p1);
+        }));
+    }
+    function b64DecodeUnicode(str) {
+        return decodeURIComponent(atob(str).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+    }
+
+    // 获取远程 Markdown 文件内容
+    async function fetchMarkdown() {
+        const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+        const response = await fetch(url, {
+            headers: { 'Authorization': `token ${token}` }
+        });
+        if (!response.ok) throw new Error('读取失败，请检查配置或Token');
+        const data = await response.json();
+        fileSha = data.sha; // 保存 SHA
+        return b64DecodeUnicode(data.content);
+    }
+
+    // 添加单词逻辑
+    async function addWord() {
+        const en = document.getElementById('word-en').value.trim();
+        const zh = document.getElementById('word-zh').value.trim();
+        const status = document.getElementById('status-msg');
+        
+        if(!en || !zh) return alert('请输入单词和释义！');
+        if(!token || !repo) return alert('请先保存配置！');
+
+        status.innerText = "正在同步到 GitHub...";
+        
+        try {
+            // 1. 获取现有内容
+            let currentContent = await fetchMarkdown();
+            // 2. 追加新单词
+            const newEntry = `\n- **${en}**: ${zh}`;
+            const updatedContent = currentContent + newEntry;
+            // 3. 推送更新
+            const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+            await fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `token ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message: `Add word: ${en}`,
+                    content: b64EncodeUnicode(updatedContent),
+                    sha: fileSha
+                })
+            });
+            status.innerText = "✅ 同步成功！可以去仓库查看 words.md";
+            document.getElementById('word-en').value = '';
+            document.getElementById('word-zh').value = '';
+        } catch (error) {
+            status.innerText = "❌ 同步失败: " + error.message;
+        }
+    }
+
+    // 抽查逻辑
+    async function startQuiz() {
+        try {
+            document.getElementById('quiz-box').classList.add('hidden');
+            let content = await fetchMarkdown();
+            // 解析 markdown 列表
+            wordList = [];
+            const lines = content.split('\n');
+            lines.forEach(line => {
+                const match = line.match(/- \*\*(.*?)\*\*: (.*)/);
+                if(match) {
+                    wordList.push({ en: match[1], zh: match[2] });
+                }
+            });
+            
+            if(wordList.length === 0) return alert('词库还是空的哦！');
+            
+            document.getElementById('quiz-box').classList.remove('hidden');
+            nextWord();
+        } catch (error) {
+            alert('读取词库失败: ' + error.message);
+        }
+    }
+
+    function nextWord() {
+        if(wordList.length === 0) return;
+        const randomObj = wordList[Math.floor(Math.random() * wordList.length)];
+        document.getElementById('quiz-word').innerText = randomObj.en;
+        document.getElementById('quiz-meaning').innerText = randomObj.zh;
+        document.getElementById('quiz-meaning').classList.add('hidden');
+    }
+
+    function showMeaning() {
+        document.getElementById('quiz-meaning').classList.remove('hidden');
+    }
+</script>
+</body>
+</html>
