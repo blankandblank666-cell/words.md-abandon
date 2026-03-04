@@ -6,3 +6,4 @@
 - **arrogant**: adj.傲慢的
 - **ponder**: adj.思考
 - **splash**: n.溅泼声 v.泼
+- **compliment**: n.赞美 vt. 赞美
