@@ -5,3 +5,4 @@
 - **retrain**: vt.阻止，控制
 - **arrogant**: adj.傲慢的
 - **ponder**: adj.思考
+- **splash**: n.溅泼声 v.泼
